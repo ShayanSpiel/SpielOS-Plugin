@@ -3,9 +3,13 @@
   "mcpServers": {
     "spielos": {
       "type": "stdio",
-      "command": "/bin/sh",
+      "command": "python3",
       "args": [
-        "./scripts/launch.sh",
+        "-I",
+        "-X",
+        "utf8",
+        "-B",
+        "scripts/entry.py",
         "mcp"
       ],
       "cwd": "."

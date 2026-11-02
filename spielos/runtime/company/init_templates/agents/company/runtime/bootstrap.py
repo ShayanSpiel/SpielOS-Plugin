@@ -34,6 +34,7 @@ import sys
 from pathlib import Path
 
 from .config import VERSION
+from ..platform import hook_command,hook_arguments
 from .paths import package_vendored_root, validate_home_destination
 
 # Owner content that `spielos update` must never touch. Everything the
@@ -141,11 +142,11 @@ def _merge_owned_hooks(root: Path, host: str, desired: dict, destination: Path) 
                    f'python3 "{root/suffix}"')
             if host=='claude':forms=(*forms,f'python3 "$CLAUDE_PROJECT_DIR/{suffix}"')
             if command in forms:return True
-            try:parts=shlex.split(command)
+            try:parts=hook_arguments(command)
             except ValueError:continue
-            if len(parts)==3 and parts[1]=='-B' and parts[2]==str(root/suffix):
+            if len(parts) in {3,5} and parts[-2]=='-B' and parts[-1]==str(root/suffix):
                 import re
-                if Path(parts[0]).is_absolute() and re.fullmatch(r'python(?:3(?:\.\d+)?)?',Path(parts[0]).name):return True
+                if Path(parts[0]).is_absolute() and re.fullmatch(r'python(?:3(?:\.\d+)?)?(?:\.exe)?',Path(parts[0]).name):return True
         return False
     merged={}
     for event,groups in hooks.items():
@@ -177,7 +178,7 @@ def _merge_claude_settings(root: Path) -> list[str]:
                 command=hook.get('command')
                 for name in CLAUDE_HOOK_SCRIPTS:
                     if command==f'python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/{name}"':
-                        hook['command']=shlex.quote(sys.executable)+' -B '+shlex.quote(str(root/'.claude/hooks'/name))
+                        hook['command']=hook_command(sys.executable,root/'.claude/hooks'/name)
     return _merge_owned_hooks(root,'claude',desired,root/'.claude/settings.json')
 
 
@@ -520,8 +521,7 @@ def scaffold(target: Path | None = None, *, force: bool = False,
                 for hook in group.get("hooks", []):
                     script = owned.get(hook.get("command"))
                     if script:
-                        hook["command"] = shlex.quote(sys.executable)+" -B " + shlex.quote(
-                            str(root / ('.'+host) / 'hooks' / script))
+                        hook["command"] = hook_command(sys.executable,root / ('.'+host) / 'hooks' / script)
                         changed = True
         if changed:
             codex_hooks.write_text(json.dumps(config, indent=2) + "\n")
