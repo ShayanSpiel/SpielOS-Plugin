@@ -1,0 +1,186 @@
+from __future__ import annotations
+
+import json
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from ..evidence import EvidenceRepository
+from ..state import Database
+
+
+@dataclass(frozen=True)
+class Memory:
+    id: str
+    scope: str
+    claim: str
+    evidence_ids: tuple[str, ...]
+    goal_id: str | None = None
+    run_id: str | None = None
+    intervention_id: str | None = None
+    workflow_id: str | None = None
+    confidence: float = 1.0
+    status: str = "active"
+    supersedes_id: str | None = None
+
+
+class MemoryRepository:
+    def __init__(self, database: Database, evidence: EvidenceRepository):
+        self.database = database
+        self.evidence = evidence
+
+    def remember(self, scope: str, claim: str, *, evidence_ids=(), goal_id=None,
+                 run_id=None, intervention_id=None, workflow_id=None,
+                 confidence: float = 1.0, supersedes_id: str | None = None) -> Memory:
+        if scope not in {"owner", "workflow", "strategy"}:
+            raise ValueError(f"invalid memory scope: {scope}")
+        ids = tuple(dict.fromkeys(evidence_ids))
+        if scope != "owner" and not ids:
+            raise ValueError(f"{scope} memory requires evidence")
+        if scope != "owner" and (not goal_id or not run_id):
+            raise ValueError(f"{scope} memory requires Goal and Run lineage")
+        if not 0.0 <= confidence <= 1.0:
+            raise ValueError("memory confidence must be between 0.0 and 1.0")
+        superseded = self.get(supersedes_id) if supersedes_id else None
+        if superseded is not None and superseded.scope != scope:
+            raise ValueError("memory can supersede only the same scope")
+        records = [self.evidence.get(item) for item in ids]
+        if goal_id and any(item.goal_id != goal_id for item in records):
+            raise ValueError("memory evidence must belong to its causal Goal")
+        if run_id and any(item.run_id != run_id for item in records):
+            raise ValueError("memory evidence must belong to its causal run")
+        if intervention_id and any(
+                item.intervention_id != intervention_id for item in records):
+            raise ValueError("memory evidence must belong to its causal Intervention")
+        memory_id = f"memory-{uuid.uuid4().hex[:12]}"
+        with self.database.connect() as connection:
+            if superseded is not None:
+                connection.execute("""UPDATE core_memory SET status='superseded'
+                    WHERE id=? AND status='active'""", (superseded.id,))
+            connection.execute("""INSERT INTO core_memory
+                (id,scope,claim,goal_id,run_id,intervention_id,workflow_id,
+                 evidence_ids_json,created_at,confidence,status,supersedes_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (memory_id, scope, claim, goal_id, run_id, intervention_id,
+                 workflow_id, json.dumps(ids), datetime.now(timezone.utc).isoformat(),
+                 confidence, "active", supersedes_id))
+        return self.get(memory_id)
+
+    def get(self, memory_id: str) -> Memory:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM core_memory WHERE id=?", (memory_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"unknown memory: {memory_id}")
+        return Memory(row["id"], row["scope"], row["claim"],
+                      tuple(json.loads(row["evidence_ids_json"])), row["goal_id"],
+                      row["run_id"], row["intervention_id"], row["workflow_id"],
+                      row["confidence"], row["status"], row["supersedes_id"])
+
+    def retire(self, memory_id: str) -> Memory:
+        """Retire one claim: flip it out of the active set for good.
+
+        Memory hygiene (L4): a claim that is an architecture invariant
+        owned by code and docs — not reusable operational learning — is
+        retired, never deleted. The row and its evidence stay exactly as
+        recorded, and ``relevant()`` stops returning it (it selects
+        ``status='active'`` only).
+
+        One writer, one status flip, no schema change: the existing
+        ``status`` column admits exactly two values ('active' and
+        'superseded'), so retiring reuses 'superseded' — the non-active
+        value the schema already owns. A retired claim is distinguished
+        from a genuine supersession chain by carrying no successor row:
+        nothing points at it with ``supersedes_id``.
+        """
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT status FROM core_memory WHERE id=?", (memory_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown memory: {memory_id}")
+            connection.execute(
+                "UPDATE core_memory SET status='superseded' "
+                "WHERE id=? AND status='active'", (memory_id,))
+        return self.get(memory_id)
+
+    def relevant(self, *, limit: int = 20, scope: str | None = None,
+                 goal_id: str | None = None,
+                 workflow_id: str | None = None,
+                 exclude_scopes: tuple[str, ...] = ()) -> list[Memory]:
+        """Active memory claims that apply to one Goal or Workflow.
+
+        Owner claims always apply (owner memory is company-global by
+        design; a goal/workflow filter never scopes it). Strategy claims
+        apply to their own Goal and — only through explicit goal
+        topology — to genuine siblings (same parent), its parent, its
+        children, and both directions of a ``supports`` edge. Sharing an
+        owner and a metric is NOT a strategy relation: two campaigns can
+        carry the same owner and metric while pursuing materially
+        different strategies, so no owner/metric join exists. Workflow
+        claims apply only with their workflow_id — with one exception:
+        direct-work lessons (workflow-scope claims with ``workflow_id``
+        NULL) are the Goal's own operational learning, so a goal query
+        returns them for that Goal exactly (``goal_id`` matches the
+        queried Goal; they never reach another Goal's query). Explicit
+        SQL joins only — no embeddings, no clustering.
+        """
+        if limit < 1:
+            return []
+        if scope is not None and scope not in {"owner", "workflow", "strategy"}:
+            raise ValueError(f"invalid memory scope: {scope}")
+        clauses, values = ["status='active'"], []
+        applicable = ["scope='owner'"]
+        if goal_id:
+            # The strategy-scope set: this Goal's own claims plus the
+            # active strategy claims of structurally related Goals —
+            # genuine siblings (the same non-null parent), the parent,
+            # the children, and supports-related Goals in both
+            # directions (core_goal_edges relation='supports'). Owner
+            # and metric equality alone never joins two Goals.
+            applicable.append("""(scope='strategy' AND (
+                goal_id=? OR goal_id IN (
+                    SELECT sibling.id FROM core_goals sibling
+                    WHERE sibling.parent_id IS NOT NULL
+                      AND sibling.parent_id=(SELECT parent_id FROM core_goals
+                                              WHERE id=?)
+                      AND sibling.id<>?)
+                OR goal_id IN (SELECT parent_id FROM core_goals
+                               WHERE id=? AND parent_id IS NOT NULL)
+                OR goal_id IN (SELECT id FROM core_goals WHERE parent_id=?)
+                OR goal_id IN (SELECT source_goal_id FROM core_goal_edges
+                               WHERE target_goal_id=? AND relation='supports')
+                OR goal_id IN (SELECT target_goal_id FROM core_goal_edges
+                               WHERE source_goal_id=? AND relation='supports')))""")
+            values.extend([goal_id] * 7)
+            # Direct-work lessons are goal-keyed: a workflow-scope claim
+            # with workflow_id NULL was learned doing this Goal's own
+            # bounded direct work (``tasks --complete --learning``), so
+            # the goal query returns it for this Goal exactly. A
+            # workflow claim with a real workflow_id still applies only
+            # with that workflow_id, and a workflow_id-NULL claim of a
+            # different Goal never reaches this query (exact goal_id
+            # match — no scope bleed).
+            applicable.append("(scope='workflow' AND workflow_id IS NULL"
+                              " AND goal_id=?)")
+            values.append(goal_id)
+        if workflow_id:
+            applicable.append("(scope='workflow' AND workflow_id=?)")
+            values.append(workflow_id)
+        clauses.append("(" + " OR ".join(applicable) + ")")
+        if scope:
+            clauses.append("scope=?")
+            values.append(scope)
+        for excluded_scope in exclude_scopes:
+            if excluded_scope not in {"owner", "workflow", "strategy"}:
+                raise ValueError(f"invalid memory scope: {excluded_scope}")
+            clauses.append("scope<>?")
+            values.append(excluded_scope)
+        values.append(limit)
+        with self.database.connect() as connection:
+            ids = [row[0] for row in connection.execute(
+                """SELECT id FROM core_memory WHERE """ + " AND ".join(clauses) + """
+                ORDER BY CASE scope WHEN 'owner' THEN 0 WHEN 'workflow' THEN 1 ELSE 2 END,
+                         created_at DESC LIMIT ?""", values)]
+        return [self.get(item) for item in ids]

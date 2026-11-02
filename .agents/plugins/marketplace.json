@@ -1,0 +1,23 @@
+{
+  "name": "spielos",
+  "owner": {
+    "name": "Shayan Spiel"
+  },
+  "interface": {
+    "displayName": "SpielOS"
+  },
+  "plugins": [
+    {
+      "name": "spielos",
+      "category": "Business & Operations",
+      "source": {
+        "source": "local",
+        "path": "./spielos"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      }
+    }
+  ]
+}
