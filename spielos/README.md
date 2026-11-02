@@ -4,7 +4,7 @@
 
 Turn recurring AI work into workflows you can test and improve. SpielOS keeps your company facts, strategy, brand, memory and decisions together in a folder you control.
 
-## Start in Codex
+## Start in Codex or Claude Code
 
 Install the desktop plugin and run **Set up SpielOS**. Choose an existing company folder or a new workspace, then describe the recurring job you want help with. The plugin includes its runtime; a separate SpielOS CLI installation is not needed. Local execution requires macOS/Linux and Python 3.11 or newer. Setup helps check that requirement and explains any missing prerequisite.
 
@@ -35,3 +35,5 @@ The GitHub marketplace and private account install are separate from OpenAI univ
 ## Dashboard, context and chat receipts
 
 Setup explains and prepares local activity recording while preserving any existing policy. Open your selected company folder in Codex and review its company hooks using the host's normal controls. The same runtime supplies context tracking, the authenticated dashboard, bounded evaluation requests and the end-of-chat tracking receipt. Local tracking works without Langfuse; setup enables no exporter. The receipt shows actual evaluation/delivery status and reported tokens/cost, with real report/trace links where available. Unknown billing stays unknown. It is assistant-rendered Markdown, not a promise of arbitrary native rich cards.
+
+Claude Code: `/plugin marketplace add ShayanSpiel/SpielOS-Plugin`, `/plugin install spielos@spielos`, then `/spielos:setup`. Use `/spielos:director`, `/spielos:dashboard` and `/spielos:help` for the main actions. [Tester guide](https://github.com/ShayanSpiel/SpielOS/blob/main/docs/tester-guide.md).

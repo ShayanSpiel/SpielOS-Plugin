@@ -3,10 +3,9 @@
     "spielos": {
       "command": "/bin/sh",
       "args": [
-        "${PLUGIN_ROOT}/scripts/launch.sh",
+        "${CLAUDE_PLUGIN_ROOT}/scripts/launch.sh",
         "mcp"
-      ],
-      "cwd": "${PLUGIN_ROOT}"
+      ]
     }
   }
 }

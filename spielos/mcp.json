@@ -5,10 +5,10 @@
       "type": "stdio",
       "command": "/bin/sh",
       "args": [
-        "${PLUGIN_ROOT}/scripts/launch.sh",
+        "./scripts/launch.sh",
         "mcp"
       ],
-      "cwd": "${PLUGIN_ROOT}"
+      "cwd": "."
     }
   }
 }

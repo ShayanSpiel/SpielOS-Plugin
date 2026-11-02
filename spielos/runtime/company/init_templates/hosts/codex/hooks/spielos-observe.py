@@ -25,7 +25,7 @@ def main():
                 from company.observability.receipts import markdown
                 receipt=markdown(runtime,activity['session_id'])
                 if reviews:
-                    command='PYTHONPATH='+shlex.quote(str(home/'.agents'))+' python3 -B -m company evaluation pending --home '+shlex.quote(str(home))+' --session '+shlex.quote(activity['session_id'])+' --json'
+                    command='PYTHONPATH='+shlex.quote(str(home/'.agents'))+' '+shlex.quote(sys.executable)+' -B -m company evaluation pending --home '+shlex.quote(str(home))+' --session '+shlex.quote(activity['session_id'])+' --json'
                     output={'decision':'block','reason':
                         'Complete one bounded evaluation pass using the CURRENT HOST MODEL, without another model service or new agent. '+
                         'Read up to three frozen review requests with: '+command+'. '+

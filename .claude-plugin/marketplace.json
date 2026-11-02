@@ -1,0 +1,16 @@
+{
+  "name": "spielos",
+  "owner": {
+    "name": "Shayan Spiel"
+  },
+  "metadata": {
+    "description": "The official SpielOS company workspace and workflow plugin."
+  },
+  "plugins": [
+    {
+      "name": "spielos",
+      "source": "./spielos",
+      "description": "Lasting company context, Director, dashboard and tested workflows."
+    }
+  ]
+}
